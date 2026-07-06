@@ -80,10 +80,6 @@ jobs:
           echo "Charset превью:"
           head -c 200 charset.txt
 
-      - name: Debug help
-        run: |
-          BIN="${{ steps.locate.outputs.bin_path }}"
-          "$BIN" --help 2>&1 | sed -n "1,80p"
       - name: Generate atlas
         run: |
           mkdir -p atlas
@@ -102,7 +98,7 @@ jobs:
             -font "$FONT" \
             -type msdf \
             -size "$SIZE" \
-            -glyphset charset.txt \
+            -charset charset.txt \
             -imageout "atlas/${NAME}.png" \
             -json "atlas/${NAME}.json" \
             -pots \
