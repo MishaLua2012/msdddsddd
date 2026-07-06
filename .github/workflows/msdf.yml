@@ -55,18 +55,19 @@ jobs:
             -DMSDF_ATLAS_USE_VCPKG=OFF \
             -DMSDF_ATLAS_USE_SKIA=OFF \
             -DMSDF_ATLAS_BUILD_STANDALONE=ON
-          cmake --build build --target msdf-atlas-gen --config Release -- -j$(nproc)
+          cmake --build build --target msdf-atlas-gen-standalone --config Release -- -j$(nproc)
 
       - name: Locate built binary
         id: locate
         run: |
-          BIN=$(find msdf-atlas-gen/build -maxdepth 3 -type f -name "msdf-atlas-gen" | head -n1)
+          BIN=$(find msdf-atlas-gen/build -type f -name "msdf-atlas-gen*" -executable | head -n1)
           if [ -z "$BIN" ]; then
-            echo "Бинарник не найден после сборки!"
-            find msdf-atlas-gen/build -maxdepth 3
+            echo "Бинарник не найден после сборки! Полный список файлов в build/bin и build/:"
+            find msdf-atlas-gen/build -maxdepth 5
             exit 1
           fi
           chmod +x "$BIN"
+          echo "Найден бинарник: $BIN"
           echo "bin_path=$BIN" >> "$GITHUB_OUTPUT"
           "$BIN" -version || true
 
