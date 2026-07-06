@@ -98,7 +98,7 @@ jobs:
             -font "$FONT" \
             -type msdf \
             -size "$SIZE" \
-            -charset charset.txt \
+            -glyphset charset.txt \
             -imageout "atlas/${NAME}.png" \
             -json "atlas/${NAME}.json" \
             -pots \
