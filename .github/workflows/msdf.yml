@@ -1,0 +1,103 @@
+name: Generate MSDF Atlas
+
+on:
+  workflow_dispatch:
+    inputs:
+      font_file:
+        description: 'Путь к шрифту в репозитории (например fonts/MyFont.ttf)'
+        required: true
+        default: 'fonts/MyFont.ttf'
+      font_size:
+        description: 'Размер шрифта (px)'
+        required: false
+        default: '32'
+      atlas_name:
+        description: 'Имя выходных файлов (без расширения)'
+        required: false
+        default: 'atlas'
+      msdf_version:
+        description: 'Версия релиза msdf-atlas-gen (тег на GitHub)'
+        required: false
+        default: 'v1.3'
+  push:
+    paths:
+      - 'fonts/**'
+      - 'charset.txt'
+      - '.github/workflows/msdf.yml'
+
+jobs:
+  build-atlas:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Download prebuilt msdf-atlas-gen
+        run: |
+          set -e
+          VERSION="${{ github.event.inputs.msdf_version || 'v1.3' }}"
+          URL="https://github.com/Chlumsky/msdf-atlas-gen/releases/download/${VERSION}/msdf-atlas-gen-${VERSION}-linux.zip"
+          echo "Скачиваю: $URL"
+          curl -L -o msdf-atlas-gen.zip "$URL" || {
+            echo "Не удалось скачать релиз $VERSION, пробую последний релиз через API";
+            LATEST_URL=$(curl -s https://api.github.com/repos/Chlumsky/msdf-atlas-gen/releases/latest \
+              | grep "browser_download_url.*linux" \
+              | grep -o 'https://[^"]*' \
+              | head -n1)
+            echo "Найден: $LATEST_URL"
+            curl -L -o msdf-atlas-gen.zip "$LATEST_URL"
+          }
+          unzip -o msdf-atlas-gen.zip -d msdf-bin
+          chmod +x msdf-bin/msdf-atlas-gen
+          ./msdf-bin/msdf-atlas-gen -version || true
+
+      - name: Prepare charset
+        run: |
+          if [ ! -f charset.txt ]; then
+            echo "charset.txt не найден в репо, использую встроенный по умолчанию не буду - создаю базовый"
+            printf ' !"#$%%&'"'"'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstuvwxyz{|}~' > charset.txt
+          fi
+          echo "Charset содержимое (превью):"
+          head -c 200 charset.txt
+
+      - name: Generate atlas
+        run: |
+          mkdir -p atlas
+          FONT="${{ github.event.inputs.font_file || 'fonts/MyFont.ttf' }}"
+          SIZE="${{ github.event.inputs.font_size || '32' }}"
+          NAME="${{ github.event.inputs.atlas_name || 'atlas' }}"
+
+          if [ ! -f "$FONT" ]; then
+            echo "ОШИБКА: файл шрифта '$FONT' не найден в репозитории."
+            echo "Положи .ttf/.otf в папку fonts/ и запусти снова."
+            exit 1
+          fi
+
+          ./msdf-bin/msdf-atlas-gen \
+            -font "$FONT" \
+            -type msdf \
+            -size "$SIZE" \
+            -charset charset.txt \
+            -imageout "atlas/${NAME}.png" \
+            -json "atlas/${NAME}.json" \
+            -pots \
+            -pxrange 4
+
+      - name: Show result info
+        run: |
+          ls -la atlas/
+          echo "---"
+          echo "Готово: atlas/*.png и atlas/*.json"
+
+      - name: Upload as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: msdf-atlas
+          path: atlas/
+
+      - name: Commit result back to repo
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add atlas/
+          git diff --cached --quiet && echo "Нечего коммитить" || (git commit -m "Auto-generate MSDF atlas [skip ci]" && git push)
