@@ -15,10 +15,6 @@ on:
         description: 'Имя выходных файлов (без расширения)'
         required: false
         default: 'atlas'
-      msdf_version:
-        description: 'Версия релиза msdf-atlas-gen (тег на GitHub)'
-        required: false
-        default: 'v1.3'
   push:
     paths:
       - 'fonts/**'
@@ -32,32 +28,55 @@ jobs:
       - name: Checkout repo
         uses: actions/checkout@v4
 
-      - name: Download prebuilt msdf-atlas-gen
+      - name: Install build dependencies
         run: |
-          set -e
-          VERSION="${{ github.event.inputs.msdf_version || 'v1.3' }}"
-          URL="https://github.com/Chlumsky/msdf-atlas-gen/releases/download/${VERSION}/msdf-atlas-gen-${VERSION}-linux.zip"
-          echo "Скачиваю: $URL"
-          curl -L -o msdf-atlas-gen.zip "$URL" || {
-            echo "Не удалось скачать релиз $VERSION, пробую последний релиз через API";
-            LATEST_URL=$(curl -s https://api.github.com/repos/Chlumsky/msdf-atlas-gen/releases/latest \
-              | grep "browser_download_url.*linux" \
-              | grep -o 'https://[^"]*' \
-              | head -n1)
-            echo "Найден: $LATEST_URL"
-            curl -L -o msdf-atlas-gen.zip "$LATEST_URL"
-          }
-          unzip -o msdf-atlas-gen.zip -d msdf-bin
-          chmod +x msdf-bin/msdf-atlas-gen
-          ./msdf-bin/msdf-atlas-gen -version || true
+          sudo apt-get update
+          sudo apt-get install -y cmake build-essential git \
+            libfreetype6-dev libpng-dev zlib1g-dev
+
+      - name: Cache msdf-atlas-gen build
+        id: cache-msdf
+        uses: actions/cache@v4
+        with:
+          path: msdf-atlas-gen/build
+          key: msdf-atlas-gen-${{ runner.os }}-v1
+
+      - name: Clone msdf-atlas-gen source
+        run: |
+          if [ ! -d "msdf-atlas-gen/.git" ]; then
+            git clone --recursive https://github.com/Chlumsky/msdf-atlas-gen.git
+          fi
+
+      - name: Build msdf-atlas-gen (no vcpkg)
+        run: |
+          cd msdf-atlas-gen
+          cmake -B build \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DMSDF_ATLAS_USE_VCPKG=OFF \
+            -DMSDF_ATLAS_USE_SKIA=OFF \
+            -DMSDF_ATLAS_BUILD_STANDALONE=ON
+          cmake --build build --target msdf-atlas-gen --config Release -- -j$(nproc)
+
+      - name: Locate built binary
+        id: locate
+        run: |
+          BIN=$(find msdf-atlas-gen/build -maxdepth 3 -type f -name "msdf-atlas-gen" | head -n1)
+          if [ -z "$BIN" ]; then
+            echo "Бинарник не найден после сборки!"
+            find msdf-atlas-gen/build -maxdepth 3
+            exit 1
+          fi
+          chmod +x "$BIN"
+          echo "bin_path=$BIN" >> "$GITHUB_OUTPUT"
+          "$BIN" -version || true
 
       - name: Prepare charset
         run: |
           if [ ! -f charset.txt ]; then
-            echo "charset.txt не найден в репо, использую встроенный по умолчанию не буду - создаю базовый"
+            echo "charset.txt не найден, создаю базовый ASCII"
             printf ' !"#$%%&'"'"'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstuvwxyz{|}~' > charset.txt
           fi
-          echo "Charset содержимое (превью):"
+          echo "Charset превью:"
           head -c 200 charset.txt
 
       - name: Generate atlas
@@ -66,6 +85,7 @@ jobs:
           FONT="${{ github.event.inputs.font_file || 'fonts/MyFont.ttf' }}"
           SIZE="${{ github.event.inputs.font_size || '32' }}"
           NAME="${{ github.event.inputs.atlas_name || 'atlas' }}"
+          BIN="${{ steps.locate.outputs.bin_path }}"
 
           if [ ! -f "$FONT" ]; then
             echo "ОШИБКА: файл шрифта '$FONT' не найден в репозитории."
@@ -73,7 +93,7 @@ jobs:
             exit 1
           fi
 
-          ./msdf-bin/msdf-atlas-gen \
+          "$BIN" \
             -font "$FONT" \
             -type msdf \
             -size "$SIZE" \
